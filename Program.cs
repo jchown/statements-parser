@@ -20,9 +20,74 @@ foreach (var statement in statements)
     {
         ParseBarclays(statement, pages, numPages);
     }
+    else if (pages.Contains("Beetham Plaza Block"))
+    {
+        ParseBlocksOnline(statement, pages, numPages);
+    }
     else
     {
         throw new Exception();
+    }
+}
+
+void ParseBlocksOnline(string filename, string pages, int numPages)
+{
+    var lines = new LinkedList<string>(pages.Split("\n"));
+    
+    //  "BEEP/1296718 Service charge for period 01 Apr 23 to 30 Jun 23 Service Charge £ 370.96 £ 1,548.16 01-Apr-23"
+    
+    var serviceChargeRegex = new Regex(@"^(?<reference>.+) Service charge for period (?<from>\d{2} \w{3} \d{2}) to (?<to>\d{2} \w{3} \d{2}) Service Charge (?<charge>.+) (?<date>\d{2}-\w{3}-\d{2})$"); 
+    var amountRegex = new Regex(@"(£\s*\d{1,3}(,\d{3})*\.\d{2})"); 
+    
+    Console.WriteLine("Parsing Blocks Online " + filename);
+
+    while (lines.Count > 4)
+    {
+        while (!TakeNext(lines).StartsWith("Description"))
+        {}
+
+        var account = TakeNext(lines);
+        
+        if (!TakeNext(lines).StartsWith("Opening balance"))
+            throw new Exception("Opening balance not found");
+
+        while (true)
+        {
+            var line = TakeNext(lines);
+            if (line.EndsWith("Closing balance"))
+                break;
+            
+            var matchSc = serviceChargeRegex.Match(line);
+            if (matchSc.Success)
+            {
+                var from = matchSc.Groups["from"].Value;
+                var to = matchSc.Groups["to"].Value;
+                var charge = matchSc.Groups["charge"].Value;
+                var date = matchSc.Groups["date"].Value;
+                
+                var amounts = amountRegex.Match(charge);
+                if (!amounts.Success)
+                    throw new Exception("Failed to parse " + charge);
+                var charged = amounts.Groups[1].Value;
+                var balance = amounts.Groups[2].Value;
+                
+                transactions.Add(new Transaction
+                {
+                    Type = "Service Charge",
+                    Date = date,
+                    Payee = from,
+                    Reference = matchSc.Groups["reference"].Value,
+                    TransferredPence = ParsePounds(charged)
+                });
+            }
+            else
+            {
+                Console.WriteLine("Unrecognised line: " + line);
+            }
+        }
+        
+        Console.WriteLine(TakeNext(lines));
+
     }
 }
 
@@ -40,13 +105,6 @@ void ParseBarclays(string filename, string pages, int numPages)
         return line.StartsWith("Date") && line.EndsWith("Balance");
     }
 
-    string TakeNext(LinkedList<string> linkedList)
-    {
-        var next = linkedList.First().Trim();
-        linkedList.RemoveFirst();
-        return next;
-    }
-
     (int transferred, int balance) ParseBarclaysTransfer(string line)
     {
         var elements = line.Split(" ");
@@ -57,7 +115,6 @@ void ParseBarclays(string filename, string pages, int numPages)
 
     while (lines.Count > 4)
     {
-        
         var date = TakeNext(lines);
         var type = TakeNext(lines);
 
@@ -136,7 +193,7 @@ bool IsTransfer(string s)
 
 int ParsePounds(string pounds)
 {
-    Regex parser = new(@"^(-)?£(\d{1,3}(,\d{3})*)(\.\d{2})?$");
+    Regex parser = new(@"^(-)?£\s*(\d{1,3}(,\d{3})*)(\.\d{2})?$");
 
     var match = parser.Match(pounds);
     if (!match.Success)
@@ -179,6 +236,13 @@ void Swap(ref string s1, ref string s2)
     (s1, s2) = (s2, s1);
 }
 
+string TakeNext(LinkedList<string> linkedList)
+{
+    var next = linkedList.First().Trim();
+    linkedList.RemoveFirst();
+    return next;
+}
+
 record Transaction
 {
     public string Date { get; set; }
@@ -187,4 +251,4 @@ record Transaction
     public string Reference { get; set; }
     public int TransferredPence { get; set; }
     public int BalancePence { get; set; }
-};
+}
